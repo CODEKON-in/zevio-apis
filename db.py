@@ -4,7 +4,13 @@ from os import getenv
 
 load_dotenv('secrets.env')
 
-conn = create_client(getenv('SUPABASE_URL'),getenv('SUPABASE_SECRET_KEY'))
+conn = create_client(getenv('SUPABASE_URL'), getenv('SUPABASE_SECRET_KEY'))
 
 def init_profile_table():
     return conn.table('profiles')
+
+def init_shop_table():
+    return conn.table('shops')
+
+def init_product_table():
+    return conn.table('products')
