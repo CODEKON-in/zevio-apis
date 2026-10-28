@@ -10,8 +10,10 @@ from os import getenv
 from dotenv import load_dotenv
 
 load_dotenv('secrets.env')
+load_dotenv()
 
 zevio = Flask('zevio')
+app = zevio
 zevio.config['JSON_SORT_KEYS'] = False
 
 API_KEY = getenv('API_KEY')
