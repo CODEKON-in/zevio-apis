@@ -32,15 +32,12 @@ def require_api_key(f):
         return f(*args, **kwargs)
     return decorated
 
-def require_json_or_form(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        return f(*args, **kwargs)
-    return decorated
-
 def get_field(source, key):
-    return source.get(key, '').strip() if source.get(key) else None
+    val = source.get(key, '')
+    return val.strip() if val else None
 
+
+# ─── USER / PROFILE ROUTES ────────────────────────────────────────────────────
 
 @zevio.route('/api/user/<string:uid>', methods=['GET'])
 @require_api_key
@@ -77,17 +74,17 @@ def _add_user():
     return response('failed to add user', code=500)
 
 
-@zevio.route('/api/user/<string:uid>/update/', methods=['PATCH'])
+@zevio.route('/api/user/update/', methods=['POST'])
 @require_api_key
-def _update_user(uid: str):
-    if not is_valid_uuid(uid):
-        return response('invalid uid', code=400)
-
+def _update_user():
     body = request.form
+    uid = get_field(body, 'uid')
     allowed_attrs = {'name', 'phone', 'user_type'}
     attr = get_field(body, 'attr')
     attr_value = get_field(body, 'attr_value')
 
+    if not uid or not is_valid_uuid(uid):
+        return response('invalid uid', code=400)
     if attr not in allowed_attrs:
         return response('invalid attribute', code=400)
     if attr == 'phone' and not phone_number_validator(attr_value or ''):
@@ -103,16 +100,20 @@ def _update_user(uid: str):
     return response('update failed', code=500)
 
 
-@zevio.route('/api/user/<string:uid>/delete/', methods=['DELETE'])
+@zevio.route('/api/user/delete/', methods=['POST'])
 @require_api_key
-def _remove_user(uid: str):
-    if not is_valid_uuid(uid):
+def _remove_user():
+    body = request.form
+    uid = get_field(body, 'uid')
+    if not uid or not is_valid_uuid(uid):
         return response('invalid uid', code=400)
     result = remove_user(uid)
     if result:
         return response('ok')
     return response('delete failed', code=500)
 
+
+# ─── SHOP ROUTES ──────────────────────────────────────────────────────────────
 
 @zevio.route('/api/shop/<string:shop_id>', methods=['GET'])
 @require_api_key
@@ -193,18 +194,18 @@ def _add_shop():
     return response('failed to create shop', code=500)
 
 
-@zevio.route('/api/shop/<string:shop_id>/update/', methods=['PATCH'])
+@zevio.route('/api/shop/update/', methods=['POST'])
 @require_api_key
-def _update_shop(shop_id: str):
-    if not is_valid_uuid(shop_id):
-        return response('invalid shop_id', code=400)
-
+def _update_shop():
     body = request.form
+    shop_id = get_field(body, 'shop_id')
     allowed_attrs = {'shop_name', 'description', 'logo_url', 'cover_image_url',
                      'contact_phone', 'contact_email', 'address', 'city'}
     attr = get_field(body, 'attr')
     attr_value = get_field(body, 'attr_value')
 
+    if not shop_id or not is_valid_uuid(shop_id):
+        return response('invalid shop_id', code=400)
     if attr not in allowed_attrs:
         return response('invalid attribute', code=400)
     if attr == 'contact_phone' and not phone_number_validator(attr_value or ''):
@@ -218,26 +219,30 @@ def _update_shop(shop_id: str):
     return response('update failed', code=500)
 
 
-@zevio.route('/api/shop/<string:shop_id>/toggle-orders/', methods=['PATCH'])
+@zevio.route('/api/shop/toggle-orders/', methods=['POST'])
 @require_api_key
-def _toggle_orders(shop_id: str):
-    if not is_valid_uuid(shop_id):
-        return response('invalid shop_id', code=400)
+def _toggle_orders():
     body = request.form
+    shop_id = get_field(body, 'shop_id')
     raw_status = get_field(body, 'status')
+
+    if not shop_id or not is_valid_uuid(shop_id):
+        return response('invalid shop_id', code=400)
     if raw_status not in ('true', 'false'):
         return response('status must be true or false', code=400)
-    status = raw_status == 'true'
-    result = toggle_accepting_orders(shop_id, status)
+
+    result = toggle_accepting_orders(shop_id, raw_status == 'true')
     if result:
         return response('ok')
     return response('update failed', code=500)
 
 
-@zevio.route('/api/shop/<string:shop_id>/delete/', methods=['DELETE'])
+@zevio.route('/api/shop/delete/', methods=['POST'])
 @require_api_key
-def _remove_shop(shop_id: str):
-    if not is_valid_uuid(shop_id):
+def _remove_shop():
+    body = request.form
+    shop_id = get_field(body, 'shop_id')
+    if not shop_id or not is_valid_uuid(shop_id):
         return response('invalid shop_id', code=400)
     remove_products_by_shop(shop_id)
     result = remove_shop(shop_id)
@@ -245,6 +250,8 @@ def _remove_shop(shop_id: str):
         return response('ok')
     return response('delete failed', code=500)
 
+
+# ─── PRODUCT ROUTES ───────────────────────────────────────────────────────────
 
 @zevio.route('/api/product/<string:product_id>', methods=['GET'])
 @require_api_key
@@ -307,17 +314,17 @@ def _add_product():
     return response('failed to add product', code=500)
 
 
-@zevio.route('/api/product/<string:product_id>/update/', methods=['PATCH'])
+@zevio.route('/api/product/update/', methods=['POST'])
 @require_api_key
-def _update_product(product_id: str):
-    if not is_valid_uuid(product_id):
-        return response('invalid product_id', code=400)
-
+def _update_product():
     body = request.form
+    product_id = get_field(body, 'product_id')
     allowed_attrs = {'name', 'description', 'price', 'image_url', 'slug'}
     attr = get_field(body, 'attr')
     attr_value = get_field(body, 'attr_value')
 
+    if not product_id or not is_valid_uuid(product_id):
+        return response('invalid product_id', code=400)
     if attr not in allowed_attrs:
         return response('invalid attribute', code=400)
     if attr == 'price':
@@ -333,32 +340,38 @@ def _update_product(product_id: str):
     return response('update failed', code=500)
 
 
-@zevio.route('/api/product/<string:product_id>/toggle-availability/', methods=['PATCH'])
+@zevio.route('/api/product/toggle-availability/', methods=['POST'])
 @require_api_key
-def _toggle_availability(product_id: str):
-    if not is_valid_uuid(product_id):
-        return response('invalid product_id', code=400)
+def _toggle_availability():
     body = request.form
+    product_id = get_field(body, 'product_id')
     raw_status = get_field(body, 'status')
+
+    if not product_id or not is_valid_uuid(product_id):
+        return response('invalid product_id', code=400)
     if raw_status not in ('true', 'false'):
         return response('status must be true or false', code=400)
-    status = raw_status == 'true'
-    result = toggle_product_availability(product_id, status)
+
+    result = toggle_product_availability(product_id, raw_status == 'true')
     if result:
         return response('ok')
     return response('update failed', code=500)
 
 
-@zevio.route('/api/product/<string:product_id>/delete/', methods=['DELETE'])
+@zevio.route('/api/product/delete/', methods=['POST'])
 @require_api_key
-def _remove_product(product_id: str):
-    if not is_valid_uuid(product_id):
+def _remove_product():
+    body = request.form
+    product_id = get_field(body, 'product_id')
+    if not product_id or not is_valid_uuid(product_id):
         return response('invalid product_id', code=400)
     result = remove_product(product_id)
     if result:
         return response('ok')
     return response('delete failed', code=500)
 
+
+# ─── ERROR HANDLERS ───────────────────────────────────────────────────────────
 
 @zevio.errorhandler(404)
 def not_found(e):
