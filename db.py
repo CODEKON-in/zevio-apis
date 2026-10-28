@@ -2,6 +2,7 @@ from supabase import create_client
 from dotenv import load_dotenv
 from os import getenv
 
+# load_dotenv picks up secrets.env locally; on Vercel env vars are injected directly
 load_dotenv('secrets.env')
 
 conn = create_client(getenv('SUPABASE_URL'), getenv('SUPABASE_SECRET_KEY'))

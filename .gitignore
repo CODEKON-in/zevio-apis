@@ -2,3 +2,6 @@ __pycache__
 .venv
 *.tok
 *.env
+secrets.env
+PAT.tok
+.vercel
