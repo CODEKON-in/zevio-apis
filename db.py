@@ -14,3 +14,9 @@ def init_shop_table():
 
 def init_product_table():
     return conn.table('products')
+
+def init_order_table():
+    return conn.table('orders')
+
+def init_order_item_table():
+    return conn.table('order_items')

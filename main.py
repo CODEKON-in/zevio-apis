@@ -2,6 +2,7 @@ from flask import Flask, jsonify, request
 from profile import *
 from shop import *
 from product import *
+from order import *
 from auth import *
 from secrets import token_hex
 from functools import wraps
@@ -366,6 +367,214 @@ def _remove_product():
     if not product_id or not is_valid_uuid(product_id):
         return response('invalid product_id', code=400)
     result = remove_product(product_id)
+    if result:
+        return response('ok')
+    return response('delete failed', code=500)
+
+
+# ─── ORDER ROUTES ────────────────────────────────────────────────────────────
+
+@zevio.route('/api/order/<string:order_id>', methods=['GET'])
+@require_api_key
+def _get_order(order_id: str):
+    if not is_valid_uuid(order_id):
+        return response('invalid order_id', code=400)
+    data = get_order(order_id)
+    if data:
+        return response('ok', data)
+    return response('order not found', code=404)
+
+
+@zevio.route('/api/order/number/<string:order_number>', methods=['GET'])
+@require_api_key
+def _get_order_by_number(order_number: str):
+    order_number = order_number.strip().upper()
+    if not order_number:
+        return response('invalid order_number', code=400)
+    data = get_order_by_number(order_number)
+    if data:
+        return response('ok', data)
+    return response('order not found', code=404)
+
+
+@zevio.route('/api/orders/by-customer/<string:customer_id>', methods=['GET'])
+@require_api_key
+def _get_orders_by_customer(customer_id: str):
+    if not is_valid_uuid(customer_id):
+        return response('invalid customer_id', code=400)
+    status = request.args.get('status', '').strip() or None
+    if status and status not in VALID_STATUSES:
+        return response('invalid status', code=400)
+    data = get_orders_by_customer(customer_id, status)
+    return response('ok', data)
+
+
+@zevio.route('/api/orders/by-shop/<string:shop_id>', methods=['GET'])
+@require_api_key
+def _get_orders_by_shop(shop_id: str):
+    if not is_valid_uuid(shop_id):
+        return response('invalid shop_id', code=400)
+    status = request.args.get('status', '').strip() or None
+    if status and status not in VALID_STATUSES:
+        return response('invalid status', code=400)
+    data = get_orders_by_shop(shop_id, status)
+    return response('ok', data)
+
+
+@zevio.route('/api/order/<string:order_id>/items/', methods=['GET'])
+@require_api_key
+def _get_order_items(order_id: str):
+    if not is_valid_uuid(order_id):
+        return response('invalid order_id', code=400)
+    data = get_order_items(order_id)
+    return response('ok', data)
+
+
+@zevio.route('/api/order/place/', methods=['POST'])
+@require_api_key
+def _place_order():
+    import json
+    body = request.form
+
+    customer_id   = get_field(body, 'customer_id')
+    shop_id       = get_field(body, 'shop_id')
+    recipient_name  = sanitize_str(get_field(body, 'recipient_name'), 100)
+    recipient_phone = phone_number_validator(get_field(body, 'recipient_phone') or '')
+    delivery_address = sanitize_str(get_field(body, 'delivery_address'), 500)
+    delivery_city    = sanitize_str(get_field(body, 'delivery_city'), 100)
+    delivery_postal_code = sanitize_str(get_field(body, 'delivery_postal_code'), 20)
+    subtotal         = price_validator(get_field(body, 'subtotal'))
+    delivery_fee     = price_validator(get_field(body, 'delivery_fee') or '0')
+    discount_amount  = price_validator(get_field(body, 'discount_amount') or '0')
+    total_amount     = price_validator(get_field(body, 'total_amount'))
+    items_raw        = get_field(body, 'items')
+
+    if not customer_id or not is_valid_uuid(customer_id):
+        return response('invalid customer_id', code=400)
+    if not shop_id or not is_valid_uuid(shop_id):
+        return response('invalid shop_id', code=400)
+    if not recipient_name:
+        return response('invalid recipient_name', code=400)
+    if not recipient_phone:
+        return response('invalid recipient_phone', code=400)
+    if not delivery_address:
+        return response('invalid delivery_address', code=400)
+    if not delivery_city:
+        return response('invalid delivery_city', code=400)
+    if subtotal is None:
+        return response('invalid subtotal', code=400)
+    if total_amount is None:
+        return response('invalid total_amount', code=400)
+    if not items_raw:
+        return response('items are required', code=400)
+
+    try:
+        items = json.loads(items_raw)
+        if not isinstance(items, list) or len(items) == 0:
+            raise ValueError()
+        for item in items:
+            if not item.get('product_name'):
+                return response('each item must have product_name', code=400)
+            if price_validator(str(item.get('unit_price', ''))) is None:
+                return response('each item must have valid unit_price', code=400)
+            if not isinstance(item.get('quantity'), int) or item['quantity'] < 1:
+                return response('each item must have valid quantity (integer >= 1)', code=400)
+    except:
+        return response('items must be a valid JSON array', code=400)
+
+    result = place_order(
+        customer_id, shop_id, subtotal, delivery_fee, discount_amount,
+        total_amount, recipient_name, recipient_phone,
+        delivery_address, delivery_city, delivery_postal_code, items
+    )
+    if result:
+        return response('ok', result, code=201)
+    return response('failed to place order', code=500)
+
+
+@zevio.route('/api/order/update-status/', methods=['POST'])
+@require_api_key
+def _update_order_status():
+    body = request.form
+    order_id = get_field(body, 'order_id')
+    status   = get_field(body, 'status')
+
+    if not order_id or not is_valid_uuid(order_id):
+        return response('invalid order_id', code=400)
+    if status not in VALID_STATUSES:
+        return response(f'invalid status. allowed: {", ".join(VALID_STATUSES)}', code=400)
+
+    result = update_order_status(order_id, status)
+    if result:
+        return response('ok')
+    return response('update failed', code=500)
+
+
+@zevio.route('/api/order/cancel/', methods=['POST'])
+@require_api_key
+def _cancel_order():
+    body = request.form
+    order_id = get_field(body, 'order_id')
+    if not order_id or not is_valid_uuid(order_id):
+        return response('invalid order_id', code=400)
+    result = cancel_order(order_id)
+    if result:
+        return response('ok')
+    return response('cancel failed', code=500)
+
+
+@zevio.route('/api/order/delete/', methods=['POST'])
+@require_api_key
+def _delete_order():
+    body = request.form
+    order_id = get_field(body, 'order_id')
+    if not order_id or not is_valid_uuid(order_id):
+        return response('invalid order_id', code=400)
+    result = delete_order(order_id)
+    if result:
+        return response('ok')
+    return response('delete failed', code=500)
+
+
+@zevio.route('/api/order/item/add/', methods=['POST'])
+@require_api_key
+def _add_order_item():
+    body = request.form
+    order_id     = get_field(body, 'order_id')
+    product_id   = get_field(body, 'product_id')
+    product_name = sanitize_str(get_field(body, 'product_name'), 200)
+    unit_price   = price_validator(get_field(body, 'unit_price'))
+    quantity_raw = get_field(body, 'quantity')
+
+    if not order_id or not is_valid_uuid(order_id):
+        return response('invalid order_id', code=400)
+    if not product_name:
+        return response('invalid product_name', code=400)
+    if unit_price is None:
+        return response('invalid unit_price', code=400)
+    try:
+        quantity = int(quantity_raw)
+        if quantity < 1:
+            raise ValueError()
+    except:
+        return response('invalid quantity (must be integer >= 1)', code=400)
+    if product_id and not is_valid_uuid(product_id):
+        return response('invalid product_id', code=400)
+
+    result = add_order_item(order_id, product_id, product_name, unit_price, quantity)
+    if result:
+        return response('ok', code=201)
+    return response('failed to add item', code=500)
+
+
+@zevio.route('/api/order/item/delete/', methods=['POST'])
+@require_api_key
+def _delete_order_item():
+    body = request.form
+    item_id = get_field(body, 'item_id')
+    if not item_id or not is_valid_uuid(item_id):
+        return response('invalid item_id', code=400)
+    result = delete_order_item(item_id)
     if result:
         return response('ok')
     return response('delete failed', code=500)
