@@ -38,6 +38,17 @@ def get_field(source, key):
     return val.strip() if val else None
 
 
+# ─── ROOT ─────────────────────────────────────────────────────────────────────
+
+@zevio.route('/', methods=['GET'])
+def index():
+    return response('ok', {
+        'name': 'Zevio API',
+        'version': '1.0.0',
+        'status': 'running',
+    })
+
+
 # ─── USER / PROFILE ROUTES ────────────────────────────────────────────────────
 
 @zevio.route('/api/user/<string:uid>', methods=['GET'])
