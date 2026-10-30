@@ -92,6 +92,7 @@ If the key is missing or invalid, the API returns:
 - [🧾 Order Items](#-order-items)
 - [🚦 HTTP Status Codes](#-http-status-codes)
 - [💻 Local Development & Deployment](#-local-development--deployment)
+- [🆕 Version 1.1.0 — admin endpoints](#-version-110--admin-endpoints)
 
 ---
 
@@ -544,3 +545,108 @@ This project is configured with zero configuration for Vercel Serverless Functio
    - `SUPABASE_SECRET_KEY`
    - `API_KEY`
 3. Click **Deploy**. Vercel will automatically detect `main.py` and run your Flask application globally at `https://zevio-apis.vercel.app/`.
+
+---
+
+## 🆕 Version 1.1.0 — admin endpoints
+
+The admin panel shows only data from this database. These endpoints were added so
+nothing has to be kept in the browser.
+
+> **Run the migration first.** Everything below needs
+> `Zevio-delivery-app/database/migrations/001_admin_real_data.sql`, applied in
+> Supabase → SQL Editor. Without it these endpoints answer `500`.
+
+### Fixed in this version
+
+| Was | Now |
+|---|---|
+| `/api/shop/add/` and `/api/product/add/` built ids as `token_hex(8)+'-'+token_hex(4)+…` → **16-8-8-8-24** characters, which is not a UUID, so every later call rejected the new record | real `uuid4()`, and the new id is returned as `data.id` |
+| `GET /api/user/<uid>` crashed on an unknown id → **500** | **404 `user not found`** |
+| `shops.postal_code` was `NOT NULL` but `/api/shop/add/` never sent one, so inserts failed | the migration drops that `NOT NULL` |
+| `quantity: true` was accepted as `1` when placing an order | **400** |
+| Order line items were inserted one by one; a failing item left half an order | one insert for all lines; the order row is removed again if it fails |
+| `update` / `toggle` / `cancel` on a missing id answered **200 `ok`** | **404** |
+
+### People
+
+```bash
+# Every profile of one role — the admin Customers and Partners lists
+GET /api/users/?user_type=customer          # or shop | delivery_person | admin
+GET /api/user/by-phone/<phone>
+```
+
+`/api/user/update/` now accepts `is_blocked`, `email`, `avatar_url` and the
+delivery-partner fields `vehicle`, `base_place`, `is_active`, `is_online`
+(booleans are sent as `true` / `false`).
+
+`/api/user/add/` accepts those same extras, and returns `data.id`.
+
+`password_hash` is never returned by any endpoint.
+
+### Admin accounts
+
+An admin is a profile with `user_type = 'admin'`. The password is stored only as a
+Werkzeug hash.
+
+```bash
+# Create the first admin (guarded by X-API-Key, so only you can call it)
+POST /api/admin/add/        name, email, phone, password      → 201 { id }
+
+# Admin login
+POST /api/auth/admin        email, password                   → 200 <profile> | 401
+```
+
+### Orders
+
+```bash
+GET  /api/orders/?status=&date=YYYY-MM-DD    # every order — admin list + dashboard
+GET  /api/orders/by-partner/<partner_id>
+GET  /api/order/items/?order_ids=<uuid>,<uuid>   # line items for many orders at once
+
+POST /api/order/assign-partner/   order_id, partner_id    # empty partner_id unassigns
+POST /api/order/mark-paid/        order_id
+```
+
+`/api/order/place/` also accepts `payment_method` (`UPI` | `COD`), `landmark`,
+`directions` and `instructions` as real columns — they used to be packed into
+`delivery_address` as `street | Landmark: … | Pay: COD`.
+
+`/api/order/update-status/` and `/api/order/cancel/` accept `reject_reason`, stamp
+the matching `confirmed_at` / `preparing_at` / `out_for_delivery_at` /
+`delivered_at` / `cancelled_at` column, and set `payment_status = 'PAID'` on
+delivery. The timeline is therefore the same on every phone.
+
+### Shops & products
+
+`/api/shop/add/` and `/api/shop/update/` now take real columns instead of a JSON
+blob appended to `description`: `category` (`hotels` | `bakery`), `owner_name`,
+`upi_id`, `open_time`, `close_time` (`HH:MM`), `delivery_time`, `is_active`,
+`subscription_plan`, `subscription_status` (`TRIAL` | `ACTIVE` | `EXPIRED`),
+`subscription_start`, `subscription_end` (`YYYY-MM-DD`).
+
+Products take `section` and `is_veg`.
+
+Both update endpoints accept **either** one `attr` / `attr_value` pair (as before)
+**or** any number of columns in one request.
+
+```bash
+GET  /api/shops/?active=true          # hide shops the admin deactivated
+POST /api/shop/set-active/   shop_id, status      # admin show/hide, separate
+                                                  # from the owner's toggle-orders
+```
+
+### Platform settings & service area
+
+```bash
+GET  /api/settings/
+POST /api/settings/   delivery_fee, partner_incentive, support_phone,
+                      support_whatsapp, platform_upi_id, platform_upi_name
+
+GET  /api/places/
+POST /api/place/add/      id (slug), name
+POST /api/place/update/   id, name     # also renames the city on that place's shops
+POST /api/place/delete/   id           # 409 if any shop is in that place
+```
+
+`GET /api/settings/` creates the single settings row with defaults if it is missing.

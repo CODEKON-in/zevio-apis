@@ -44,3 +44,8 @@ def init_order_table():
 def init_order_item_table():
     return LazyTable('order_items')
 
+def init_settings_table():
+    return LazyTable('platform_settings')
+
+def init_place_table():
+    return LazyTable('service_places')
