@@ -24,9 +24,22 @@ zevio = Flask('zevio')
 app = zevio
 zevio.config['JSON_SORT_KEYS'] = False
 
+def _clean_key(value):
+    """An API key as it really arrives.
+
+    A key pasted into a hosting dashboard often carries a trailing newline, a
+    stray space, or the quotes it was copied inside. None of that is part of the
+    key, but compare_digest sees a different string and answers 401 — which
+    looks exactly like a wrong key and is why this is worth normalising on both
+    sides of the comparison.
+    """
+    if not value:
+        return ''
+    return value.strip().strip('\'"').strip()
+
 # The frontend proxy and Netlify both call this ZEVIO_API_KEY, so accept either
 # spelling — one renamed variable should not silently reject every request.
-API_KEY = getenv('API_KEY') or getenv('ZEVIO_API_KEY')
+API_KEY = _clean_key(getenv('API_KEY') or getenv('ZEVIO_API_KEY'))
 
 # The OAuth client the ID token must have been issued for. Without it a token
 # from ANY Google app would be accepted, so /api/auth/google refuses to run.
@@ -51,7 +64,14 @@ def require_api_key(f):
         # from the caller — both answered 401 — which is impossible to debug.
         if not API_KEY:
             return response('server not configured: set API_KEY (or ZEVIO_API_KEY)', code=500)
-        key = request.headers.get('X-API-Key')
+        # The key normally arrives as a header. It may also arrive as the
+        # `zv_key` query parameter, because Vercel's rewrites can forward a
+        # request to this API but CANNOT add a header to it, and the front end
+        # has no serverless function of its own to add one. The parameter is
+        # filled in server-side by the rewrite in the front end's vercel.json,
+        # so it never appears in the browser's address bar and is never part of
+        # the JavaScript bundle.
+        key = _clean_key(request.headers.get('X-API-Key') or request.args.get('zv_key'))
         # Constant-time compare, so a wrong key cannot be guessed byte by byte.
         if not key or not compare_digest(key, API_KEY):
             return response('unauthorized', code=401)
