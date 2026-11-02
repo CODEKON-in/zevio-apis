@@ -11,6 +11,7 @@ import shop as shops
 import product as products
 import order as orders
 import settings as platform
+from db import DatabaseNotConfigured
 from order import VALID_STATUSES
 from auth import (bool_validator, date_validator, email_validator, hash_password,
                   is_valid_uuid, password_validator, phone_number_validator,
@@ -1204,7 +1205,16 @@ def method_not_allowed(e):
 
 @zevio.errorhandler(500)
 def internal_error(e):
+    # A missing database configuration used to arrive here and be reported as
+    # 'internal server error', which says nothing about the actual cause.
+    original = getattr(e, 'original_exception', None)
+    if isinstance(original, DatabaseNotConfigured):
+        return response(str(original), code=503)
     return response('internal server error', code=500)
+
+@zevio.errorhandler(DatabaseNotConfigured)
+def not_configured(e):
+    return response(str(e), code=503)
 
 
 if __name__ == '__main__':
