@@ -1,5 +1,5 @@
 from flask import Flask, jsonify, request
-from secrets import token_hex
+from secrets import compare_digest, token_hex
 from functools import wraps
 from os import getenv
 from dotenv import load_dotenv
@@ -24,7 +24,14 @@ zevio = Flask('zevio')
 app = zevio
 zevio.config['JSON_SORT_KEYS'] = False
 
-API_KEY = getenv('API_KEY')
+# The frontend proxy and Netlify both call this ZEVIO_API_KEY, so accept either
+# spelling — one renamed variable should not silently reject every request.
+API_KEY = getenv('API_KEY') or getenv('ZEVIO_API_KEY')
+
+# The OAuth client the ID token must have been issued for. Without it a token
+# from ANY Google app would be accepted, so /api/auth/google refuses to run.
+# (A client ID is public, so sharing the browser's value here is fine.)
+GOOGLE_CLIENT_ID = getenv('GOOGLE_CLIENT_ID') or getenv('VITE_GOOGLE_CLIENT_ID')
 
 ALLOWED_USER_TYPES = ['customer', 'shop', 'delivery_person']
 SHOP_CATEGORIES = ['hotels', 'bakery']
@@ -40,8 +47,13 @@ def response(status, data=None, code=200):
 def require_api_key(f):
     @wraps(f)
     def decorated(*args, **kwargs):
+        # A missing API_KEY on the server used to look exactly like a wrong key
+        # from the caller — both answered 401 — which is impossible to debug.
+        if not API_KEY:
+            return response('server not configured: set API_KEY (or ZEVIO_API_KEY)', code=500)
         key = request.headers.get('X-API-Key')
-        if not key or key != API_KEY:
+        # Constant-time compare, so a wrong key cannot be guessed byte by byte.
+        if not key or not compare_digest(key, API_KEY):
             return response('unauthorized', code=401)
         return f(*args, **kwargs)
     return decorated
@@ -61,7 +73,7 @@ def present(key):
 def index():
     return response('ok', {
         'name': 'Zevio API',
-        'version': '1.1.0',
+        'version': '1.2.0',
         'status': 'running',
     })
 
@@ -125,6 +137,8 @@ def _add_user():
         if not email:
             return response('invalid email', code=400)
         extra['email'] = email
+    if present('google_sub'):
+        extra['google_sub'] = sanitize_str(get_field(body, 'google_sub'), 255)
     # Delivery-partner details.
     if present('vehicle'):
         extra['vehicle'] = sanitize_str(get_field(body, 'vehicle'), 30)
@@ -151,7 +165,8 @@ def _update_user():
     attr_value = get_field(body, 'attr_value')
 
     allowed_attrs = {'name', 'phone', 'user_type', 'email', 'avatar_url',
-                     'is_blocked', 'vehicle', 'base_place', 'is_active', 'is_online'}
+                     'is_blocked', 'vehicle', 'base_place', 'is_active', 'is_online',
+                     'google_sub'}
 
     if not uid or not is_valid_uuid(uid):
         return response('invalid uid', code=400)
@@ -183,6 +198,8 @@ def _update_user():
         attr_value = sanitize_str(attr_value, 100)
     elif attr == 'avatar_url':
         attr_value = sanitize_str(attr_value, 500)
+    elif attr == 'google_sub':
+        attr_value = sanitize_str(attr_value, 255)
 
     if not profiles.get_user_info(uid):
         return response('user not found', code=404)
@@ -255,6 +272,70 @@ def _admin_login():
     return response('ok', data)
 
 
+# ─── GOOGLE SIGN-IN ───────────────────────────────────────────────────────────
+
+@zevio.route('/api/auth/google', methods=['POST'])
+@require_api_key
+def _google_sign_in():
+    """Verifies a Google ID token and returns who it belongs to.
+
+    The browser cannot do this: it can only decode the token, so a hand-made one
+    with any `sub` would pass. Here the signature, issuer and audience are checked
+    against Google's public keys, which is what makes the sign-in real.
+
+    Answers {google: {...}, profile: <row or null>}. A null profile means the
+    Google account is genuine but nobody has signed up with it yet.
+    """
+    if not GOOGLE_CLIENT_ID:
+        return response('server not configured: GOOGLE_CLIENT_ID is not set', code=500)
+
+    credential = get_field(request.form, 'credential')
+    if not credential:
+        return response('credential is required', code=400)
+
+    try:
+        from google.oauth2 import id_token
+        from google.auth.transport import requests as google_requests
+        claims = id_token.verify_oauth2_token(credential, google_requests.Request(), GOOGLE_CLIENT_ID)
+    except ValueError:
+        # Bad signature, wrong audience, expired — all mean "not a valid sign-in".
+        return response('invalid google token', code=401)
+    except Exception:
+        # Google's certificate endpoint unreachable, etc.
+        return response('could not verify google token', code=503)
+
+    if claims.get('iss') not in ('accounts.google.com', 'https://accounts.google.com'):
+        return response('invalid google token', code=401)
+    if not claims.get('email_verified'):
+        return response('this google account has no verified email', code=403)
+
+    sub = claims.get('sub')
+    email = (claims.get('email') or '').lower()
+    if not sub or not email:
+        return response('invalid google token', code=401)
+
+    google = {
+        'sub': sub,
+        'email': email,
+        'name': claims.get('name') or claims.get('given_name') or '',
+        'picture': claims.get('picture'),
+    }
+
+    # Find them by the verified Google id; fall back to email for accounts that
+    # existed before Google sign-in, and link those on the spot.
+    profile = profiles.get_user_by_google_sub(sub)
+    if not profile:
+        profile = profiles.get_user_by_email(email)
+        if profile:
+            profiles.link_google_sub(profile['id'], sub)
+            profile = profiles.get_user_info(profile['id'])
+
+    if profile and profile.get('is_blocked'):
+        return response('account is blocked', code=403)
+
+    return response('ok', {'google': google, 'profile': profile})
+
+
 # ─── SHOP ROUTES ──────────────────────────────────────────────────────────────
 
 def _shop_fields(body, creating: bool):
@@ -271,7 +352,6 @@ def _shop_fields(body, creating: bool):
     text('cover_image_url', 'cover_image_url', 500)
     text('address', 'address', 500)
     text('city', 'city', 100)
-    text('postal_code', 'postal_code', 10)
     text('owner_name', 'owner_name', 150)
     text('upi_id', 'upi_id', 100)
     text('delivery_time', 'delivery_time', 20)
@@ -1108,4 +1188,7 @@ def internal_error(e):
 
 
 if __name__ == '__main__':
-    zevio.run(host='0.0.0.0', port=2222)
+    # threaded: the default single-threaded server deadlocks the whole API if one
+    # browser connection is dropped mid-request, which looks exactly like the API
+    # being down. Every later call then times out.
+    zevio.run(host='0.0.0.0', port=2222, threaded=True)

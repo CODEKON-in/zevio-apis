@@ -3,7 +3,10 @@ from uuid import uuid4
 
 profile_table = init_profile_table()
 
-# Columns the admin panel reads. password_hash is never selected.
+# Columns the admin panel reads. password_hash is never selected, and
+# google_sub is deliberately left out: nothing outside the Google sign-in
+# lookup needs it, and listing it here would make every profile endpoint fail
+# on a database that has not had migration 004 yet.
 PUBLIC_COLUMNS = ('id,name,phone,email,avatar_url,user_type,is_blocked,'
                   'vehicle,base_place,is_active,is_online,created_at,updated_at')
 
@@ -37,6 +40,18 @@ def get_user_by_email(email: str) -> dict:
     if users.data:
         return _public(users.data[0])
     return None
+
+def get_user_by_google_sub(google_sub: str) -> dict:
+    """The profile belonging to a VERIFIED Google account id."""
+    users = profile_table.select(PUBLIC_COLUMNS).eq('google_sub', google_sub).execute()
+    if users.data:
+        return _public(users.data[0])
+    return None
+
+def link_google_sub(uid: str, google_sub: str) -> bool:
+    """Attach a Google account to a profile that predates Google sign-in, so
+    older accounts are found directly on every later sign-in."""
+    return update_user_fields(uid, {'google_sub': google_sub})
 
 def get_user_by_phone(phone: str) -> dict:
     users = profile_table.select(PUBLIC_COLUMNS).eq('phone', phone).execute()

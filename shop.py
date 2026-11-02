@@ -7,7 +7,7 @@ shop_table = init_shop_table()
 # update endpoints accept exactly the same set.
 EDITABLE_COLUMNS = (
     'shop_name', 'description', 'logo_url', 'cover_image_url',
-    'contact_phone', 'contact_email', 'address', 'city', 'postal_code',
+    'contact_phone', 'contact_email', 'address', 'city',
     'category', 'owner_name', 'upi_id', 'open_time', 'close_time',
     'delivery_time', 'is_active',
     'subscription_plan', 'subscription_status', 'subscription_start', 'subscription_end',
