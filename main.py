@@ -11,6 +11,7 @@ import shop as shops
 import product as products
 import order as orders
 import settings as platform
+import seller
 from db import DatabaseNotConfigured
 from order import VALID_STATUSES
 from auth import (bool_validator, date_validator, email_validator, hash_password,
@@ -1191,6 +1192,12 @@ def _remove_place():
     if platform.remove_place(place_id):
         return response('ok')
     return response('delete failed', code=500)
+
+
+# ─── SELLER PANEL (Mynt) ──────────────────────────────────────────────────────
+
+seller.register(zevio, response=response, require_api_key=require_api_key,
+                google_client_id=lambda: GOOGLE_CLIENT_ID)
 
 
 # ─── ERROR HANDLERS ───────────────────────────────────────────────────────────

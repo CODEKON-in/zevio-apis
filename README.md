@@ -650,3 +650,30 @@ POST /api/place/delete/   id           # 409 if any shop is in that place
 ```
 
 `GET /api/settings/` creates the single settings row with defaults if it is missing.
+
+---
+
+## 🧑‍🍳 Seller Panel (Mynt) — `/api/seller/*`
+
+Backend for `mynt-seller-admin-panel`. Every route is scoped to the signed-in seller's own shop; the shop id is never taken from the request.
+
+**Auth (both required):** `X-API-Key: <key>` and `Authorization: Bearer <Google ID token>` (verified against `GOOGLE_CLIENT_ID`). The seller is the `profiles` row with that email and `user_type = 'shop'` (not blocked, `is_active` not false) that owns a shop via `shops.profile_id`; otherwise `403`.
+
+| Method | Path | Form fields | Purpose |
+| :--- | :--- | :--- | :--- |
+| GET | `/api/seller/me` | – | Sign-in check: profile + shop |
+| GET | `/api/seller/shop` | – | The seller's shop |
+| POST | `/api/seller/shop/update/` | `shop_name, category, contact_phone, city, upi_id, open_time, close_time, logo_url` (any) | Shop profile. `category` accepts `hotels`/`bakery` or the panel's labels |
+| POST | `/api/seller/shop/toggle-open/` | `status` (true/false) | Open / closed (`is_accepting_orders`) |
+| GET | `/api/seller/products` | – | Menu |
+| POST | `/api/seller/product/add/` | `name, price` + `description, image_url, section, is_veg, is_available` | Add item |
+| POST | `/api/seller/product/update/` | `product_id` + any product field | Edit item |
+| POST | `/api/seller/product/toggle-stock/` | `product_id, in_stock` | In/out of stock |
+| POST | `/api/seller/product/delete/` | `product_id` | Delete item |
+| GET | `/api/seller/orders` | `?status=&date=YYYY-MM-DD` | Shop orders with `items` |
+| GET | `/api/seller/order/<id>` | – | One order with `items` |
+| POST | `/api/seller/order/accept/` | `order_id` | pending/confirmed → `preparing` |
+| POST | `/api/seller/order/reject/` | `order_id, reject_reason` | → `cancelled` |
+| POST | `/api/seller/order/ready/` | `order_id` | preparing/confirmed → `out_for_delivery` |
+
+Invalid transitions return `409`; another shop's product/order returns `404`.
